@@ -85,3 +85,5 @@ sql_select_rooms_diff_sex = """
     HAVING COUNT(DISTINCT s.sex) = 2
     ORDER BY r.id;
 """
+
+QUERIES = [sql_select_rooms, sql_select_5_rooms_min_age, sql_select_5_rooms_max_diff, sql_select_rooms_diff_sex]
