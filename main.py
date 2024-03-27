@@ -1,72 +1,66 @@
 import json
-import functools
 import psycopg2
 from pg_config import config
 from const import *
 
 
-def db_connect():
-    """Establishes connection to the db and returns the connection object."""
+class DatabaseManager:
+    def __init__(self) -> None:
+        self.connection: psycopg2.extensions.connection = None
+        self.cursor: psycopg2.extensions.cursor = None
 
-    conf = config()
-    connection = psycopg2.connect(dbname=conf['dbname'], user=conf['user'], password=conf['password'], port=conf['port'])
-    return connection
+    def connect(self) -> None:
+        """Establishes connection to the db and returns the connection object."""
+        conf: dict = config()
+        self.connection = psycopg2.connect(dbname=conf['dbname'], user=conf['user'], password=conf['password'], port=conf['port'])
+        self.cursor = self.connection.cursor()
 
+    def disconnect(self) -> None:
+        """Closes the cursor and connection."""
+        self.cursor.close()
+        self.connection.close()
 
-def connection_handler(func):
-    """A decorator that establishes connection to the db and passes a created cursor to the called function. 
-    When the func is executed, the transaction is being commited, and the connection is being closed."""
+    def create_table(self, table: str, drop: bool = True) -> None:
+        """Creates table if not exists, drops table first if not specified otherwise"""
+        if drop:
+            self.cursor.execute(sql_drop_table % table)
+            print(f'dropped {table}')
+        self.cursor.execute(sql_create_table[table])
+        self.connection.commit()
 
-    @functools.wraps(func)
-    def inner(*args, **kwargs):
-        conf = config()
-        connection = psycopg2.connect(dbname=conf['dbname'], user=conf['user'], password=conf['password'], port=conf['port'])
-        cursor = connection.cursor()
-        func(cursor, *args, **kwargs)
-        connection.commit()
-        connection.close()
-    return inner
+    def insert_values(self, data: list[dict], table: str, drop: bool = False) -> None:
+        """Inserts values from data to the specified table."""
+        column_names: list[str] = data[0].keys()
+        query = "INSERT INTO {} ({}) VALUES ({})".format(
+            table,
+            ', '.join(column_names),
+            ', '.join(['%s'] * len(column_names))
+        )
+        for row in data:
+            self.cursor.execute(query, list(row.values()))
+        self.connection.commit()
 
 
 def read_json(path: str) -> list[dict]:
     """Performs json deserialization and returns a Python object"""
-
-    file = open(path,'r')
-    return json.loads(file.read())
-
-
-@connection_handler
-def create_table(cursor, table, drop=True):
-    """Creates table if not exists, drops table first if not specified otherwise"""
-    if drop:
-        cursor.execute(sql_drop_table % table)
-        print(f'dropped {table}')
-    cursor.execute(sql_create_table[table])
+    with open(path, 'r') as file:
+        return json.loads(file.read())
 
 
-@connection_handler
-def insert_values(cursor, data: list, table: str, drop: bool = False) -> None:
-    """Inserts values from data to the specified table."""
-
-    column_names = data[0].keys()
-
-    query = "INSERT INTO {} ({}) VALUES ({})".format(
-        table,
-        ', '.join(column_names),
-        ', '.join(['%s'] * len(column_names))
-    )
-
-    for row in data:
-        cursor.execute(query, list(row.values()))
-
-
-def main():
-    data_rooms = read_json("./data/rooms.json")
-    data_students = read_json("./data/students.json")
-    create_table(ROOMS, drop=True)
-    create_table(STUDENTS, drop=True)
-    insert_values(data_rooms, ROOMS, drop=True)
-    insert_values(data_students, STUDENTS, drop=True)
+def main() -> None:
+    db_manager = DatabaseManager()
+    db_manager.connect()
+    
+    data_rooms: list[dict] = read_json(ROOMS_DATA_PATH)
+    data_students: list[dict] = read_json(STUDENTS_DATA_PATH)
+    
+    db_manager.create_table(ROOMS, drop=True)
+    db_manager.create_table(STUDENTS, drop=True)
+    
+    db_manager.insert_values(data_rooms, ROOMS, drop=True)
+    db_manager.insert_values(data_students, STUDENTS, drop=True)
+    
+    db_manager.disconnect()
 
 
 if __name__ == '__main__':
